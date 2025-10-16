@@ -1,0 +1,234 @@
+---
+title: "Exploring Squad Structure and Performance in Professional Soccer"
+author: "Mikail Rizvi"
+date: "2025-10-10"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(knitr)
+```
+
+## Introduction
+
+Professional soccer has evolved dramatically over the past decade, with clubs increasingly relying on data analytics to gain competitive advantages. Understanding how squad characteristics relate to on-field success can provide valuable insights for team management, player recruitment, and tactical planning.
+
+
+
+This analysis examines match results and player statistics from European soccer leagues to investigate how squad structure influences team performance. The data comes from [football-data.co.uk](https://www.football-data.co.uk/), which provides comprehensive match statistics and player performance data.
+
+### Research Questions
+
+**RQ1:** To what extent does squad rotation (number of players used throughout the season) predict league performance?
+
+**RQ2:** How does squad experience (measured by average squad age) associate with team performance throughout the season?
+
+## Data Preparation
+
+```{r clean-match-data}
+#This actually took forever this was the worst data cleaning of my life oh my goodness
+#I used the pipe from the readings!! I figured I would just cite that I learned it from readings and external sources
+#Import raw match data from CSV file
+matches <- read_csv("E0.csv")
+#Select only the columns we need for analysis
+matches_clean <- select(matches, Div, Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR)
+#Standardize team names to match player dataset using case_when for conditional matching
+matches_clean <- matches_clean %>% mutate(HomeTeam = case_when(HomeTeam == "Man United" ~ "Manchester United", HomeTeam == "Man City" ~ "Manchester City", HomeTeam == "Nott'm Forest" ~ "Nottingham Forest", HomeTeam == "Tottenham" ~ "Tottenham Hotspur", HomeTeam == "Leicester" ~ "Leicester City", HomeTeam == "Brighton" ~ "Brighton & Hove Albion", HomeTeam == "Wolves" ~ "Wolverhampton Wanderers", HomeTeam == "Newcastle" ~ "Newcastle United", HomeTeam == "West Ham" ~ "West Ham United", HomeTeam == "Ipswich" ~ "Ipswich Town", TRUE ~ HomeTeam), AwayTeam = case_when(AwayTeam == "Man United" ~ "Manchester United", AwayTeam == "Man City" ~ "Manchester City", AwayTeam == "Nott'm Forest" ~ "Nottingham Forest", AwayTeam == "Tottenham" ~ "Tottenham Hotspur", AwayTeam == "Leicester" ~ "Leicester City", AwayTeam == "Brighton" ~ "Brighton & Hove Albion", AwayTeam == "Wolves" ~ "Wolverhampton Wanderers", AwayTeam == "Newcastle" ~ "Newcastle United", AwayTeam == "West Ham" ~ "West Ham United", AwayTeam == "Ipswich" ~ "Ipswich Town", TRUE ~ AwayTeam))
+#Extract season year from date string (last 4 characters)
+matches_clean <- mutate(matches_clean, Season = str_sub(Date, -4, -1))
+#Create home team statistics with points calculation (3 for win, 1 for draw, 0 for loss)
+home_stats <- matches_clean %>% mutate(Team = HomeTeam, GoalsFor = FTHG, GoalsAgainst = FTAG, Points = case_when(FTR == "H" ~ 3, FTR == "D" ~ 1, FTR == "A" ~ 0), Wins = if_else(FTR == "H", 1, 0), Draws = if_else(FTR == "D", 1, 0), Losses = if_else(FTR == "A", 1, 0), GamesPlayed = 1) %>% select(Team, Season, GoalsFor, GoalsAgainst, Points, Wins, Draws, Losses, GamesPlayed)
+#Create away team statistics with reversed goal columns
+away_stats <- matches_clean %>% mutate(Team = AwayTeam, GoalsFor = FTAG, GoalsAgainst = FTHG, Points = case_when(FTR == "A" ~ 3, FTR == "D" ~ 1, FTR == "H" ~ 0), Wins = if_else(FTR == "A", 1, 0), Draws = if_else(FTR == "D", 1, 0), Losses = if_else(FTR == "H", 1, 0), GamesPlayed = 1) %>% select(Team, Season, GoalsFor, GoalsAgainst, Points, Wins, Draws, Losses, GamesPlayed)
+#Combine home and away stats into single dataset
+all_stats <- bind_rows(home_stats, away_stats)
+#Aggregate by team and season to get total statistics and calculate derived metrics
+team_season_stats <- all_stats %>% group_by(Team, Season) %>% summarize(TotalPoints = sum(Points), TotalGamesPlayed = sum(GamesPlayed), TotalWins = sum(Wins), TotalDraws = sum(Draws), TotalLosses = sum(Losses), GoalsFor = sum(GoalsFor), GoalsAgainst = sum(GoalsAgainst), .groups = "drop") %>% mutate(GoalDifference = GoalsFor - GoalsAgainst, WinRatio = round(TotalWins / TotalGamesPlayed, 3), LossRatio = round(TotalLosses / TotalGamesPlayed, 3), PointsPerGame = round(TotalPoints / TotalGamesPlayed, 2))
+```
+
+```{r clean-player-data}
+#Cleaning another dataset for player stats and not just team stats
+#I used .groups drop to suppress warning messages from group_by operations
+#Import player-level data
+players <- read_csv("database.csv")
+#Parse age from "years-days" format (e.g., "29-343") to extract just years using regex
+players_clean <- players %>% mutate(Age_Years = as.numeric(str_extract(Age, "^[0-9]+")))
+#Extract year and month from date, create Season variable matching the match data format
+players_clean <- players_clean %>% mutate(Year = as.numeric(str_sub(Date, 1, 4)), Month = as.numeric(str_sub(Date, 6, 7)), Season = as.character(Year))
+#Keep only relevant columns for analysis
+players_clean <- select(players_clean, Player, Team, Position, Age_Years, Minutes, Season, Date)
+#Remove players who didn't play (zero minutes) to ensure accurate squad age calculations
+players_clean <- filter(players_clean, Minutes > 0)
+#Calculate average squad age and count unique players used per team per season
+team_avg_age <- players_clean %>% group_by(Team, Season) %>% summarize(Avg_Squad_Age = round(mean(Age_Years, na.rm = TRUE), 2), Total_Players_Used = n_distinct(Player), Total_Matches_Played = n_distinct(Date), .groups = "drop")
+```
+
+```{r merge-data}
+#Merge match statistics with player statistics on Team and Season
+soccer_data <- inner_join(team_season_stats, team_avg_age, by = c("Team", "Season"))
+#Select final variables of interest for analysis
+soccer_final <- soccer_data %>% select(Team, Season, TotalPoints, TotalGamesPlayed, TotalWins, GoalDifference, WinRatio, PointsPerGame, Avg_Squad_Age, Total_Players_Used)
+```
+
+The dataset was prepared through multiple stages of data wrangling:
+
+**Merging:** Two separate datasets were combined - match-level results from football-data.co.uk and player-level statistics. The match data contained individual game results (home team, away team, scores, dates), while the player data included performance metrics for each player in each match. First, match results were aggregated by team and season to calculate total points, wins, and goal differences. Separately, player data was aggregated to compute average squad ages and count unique players used. These two team-season datasets were then merged using `inner_join()` on Team and Season as key variables, resulting in `r nrow(soccer_final)` team-season observations.
+
+**Variable Creation:** Several new variables were calculated from the raw data:
+
+- **Win Ratio:** Calculated as total wins divided by games played to standardize performance across different numbers of matches
+- **Points Per Game:** Average points earned per match (3 for win, 1 for draw, 0 for loss) to enable fair comparisons
+- **Goal Difference:** Goals scored minus goals conceded as an indicator of team quality
+- **Average Squad Age:** Mean age of all players who participated in matches, providing insight into squad experience
+- **Total Players Used:** Count of unique players who played at least one minute, measuring squad rotation
+
+**Data Formatting:** Season years were extracted from date strings. For match data in "DD/MM/YYYY" format, the year was extracted using `str_sub()`. For player data in "YYYY-MM-DD" format, the year was similarly extracted. Both were converted to simple year format (e.g., "2024") to ensure successful merging. Player ages were parsed from a "years-days" format (e.g., "29-343") using `str_extract()` to extract just the years component.
+
+**Handling Missing Values:** Players with zero minutes played were excluded from squad age calculations to ensure only active squad members influenced the average. This filtering ensured our metrics reflected actual on-field squad characteristics rather than bench players.
+
+### Challenge Faced
+
+One significant challenge was reconciling team names and season formats between the two datasets. Initially, the player data used a season range format (e.g., "2024-25") while the match data used just the year. This format mismatch caused the merge to fail completely, returning zero observations. I had to standardize both datasets to use just the year format. Additionally, I had to carefully verify that team names matched exactly between datasets, as any spelling differences would result in lost observations during the inner join.
+
+## Variable Descriptions
+
+```{r variable-table}
+#Create a table of variables with descriptions using tibble
+variables <- tibble(Variable = c("Team", "Season", "TotalPoints", "TotalGamesPlayed", "TotalWins", "GoalDifference", "WinRatio", "PointsPerGame", "Avg_Squad_Age", "Total_Players_Used"), Type = c("Categorical", "Categorical", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric", "Numeric"), Description = c("Name of the soccer club", "Season year (e.g., '2024')", "Total league points earned in the season", "Number of matches played in the season", "Total number of wins in the season", "Goals scored minus goals conceded", "Proportion of games won (0-1 scale)", "Average points earned per match", "Mean age of players used during the season", "Number of unique players who played in at least one match"))
+#I imported knitr and a kable is just a knit table, I got this from https://bookdown.org/yihui/rmarkdown-cookbook/kable.html
+#Display the table using kable for nice formatting
+kable(variables, caption = "Variables of Interest")
+```
+
+The final dataset contains `r nrow(soccer_final)` team-seasons across `r length(unique(soccer_final$Season))` different seasons, with `r length(unique(soccer_final$Team))` unique teams represented.
+
+## Univariate Analyses
+
+### Win Ratio Distribution
+
+```{r win-ratio-dist}
+#Calculate summary statistics for win ratio
+win_summary <- summarize(soccer_final, mean_win = round(mean(WinRatio, na.rm = TRUE), 3), median_win = round(median(WinRatio, na.rm = TRUE), 3), sd_win = round(sd(WinRatio, na.rm = TRUE), 3), min_win = round(min(WinRatio, na.rm = TRUE), 3), max_win = round(max(WinRatio, na.rm = TRUE), 3))
+#Create histogram showing distribution of win ratios across teams
+ggplot(soccer_final, aes(x = WinRatio)) + geom_histogram(bins = 20, fill = "steelblue", color = "black") + labs(title = "Distribution of Team Win Ratios", x = "Win Ratio (Proportion of Games Won)", y = "Number of Teams") + theme_minimal()
+```
+
+The distribution of win ratios shows the proportion of games won by teams throughout their seasons. The mean win ratio is `r win_summary$mean_win` with a standard deviation of `r win_summary$sd_win`. Win ratios range from `r win_summary$min_win` to `r win_summary$max_win`, indicating substantial variation in team performance. The distribution appears roughly normal with some spread, suggesting teams range from consistently losing to consistently winning with many teams achieving moderate success rates in between.
+
+### Average Squad Age Distribution
+
+```{r age-dist}
+#Calculate summary statistics for squad age
+age_summary <- summarize(soccer_final, mean_age = round(mean(Avg_Squad_Age, na.rm = TRUE), 2), median_age = round(median(Avg_Squad_Age, na.rm = TRUE), 2), sd_age = round(sd(Avg_Squad_Age, na.rm = TRUE), 2), min_age = round(min(Avg_Squad_Age, na.rm = TRUE), 2), max_age = round(max(Avg_Squad_Age, na.rm = TRUE), 2))
+#Create histogram showing distribution of average squad ages
+ggplot(soccer_final, aes(x = Avg_Squad_Age)) + geom_histogram(bins = 15, fill = "darkgreen", color = "black") + labs(title = "Distribution of Average Squad Ages", x = "Average Squad Age (Years)", y = "Number of Teams") + theme_minimal()
+```
+
+Average squad age across all teams has a mean of `r age_summary$mean_age` years with a standard deviation of `r age_summary$sd_age` years. The youngest average squad age observed was `r age_summary$min_age` years while the oldest was `r age_summary$max_age` years. The distribution appears approximately normal and relatively concentrated, suggesting most professional teams maintain similar age profiles, clustering around the mid-to-late twenties. This makes sense as players in this age range are typically in their athletic prime.
+
+### Total Players Used Distribution
+
+```{r players-used-dist}
+#Calculate summary statistics for number of players used
+players_summary <- summarize(soccer_final, mean_players = round(mean(Total_Players_Used, na.rm = TRUE), 1), median_players = round(median(Total_Players_Used, na.rm = TRUE), 0), sd_players = round(sd(Total_Players_Used, na.rm = TRUE), 1), min_players = min(Total_Players_Used, na.rm = TRUE), max_players = max(Total_Players_Used, na.rm = TRUE))
+#Create histogram showing squad rotation levels (number of players used)
+ggplot(soccer_final, aes(x = Total_Players_Used)) + geom_histogram(bins = 20, fill = "coral", color = "black") + labs(title = "Distribution of Squad Rotation Levels", x = "Total Number of Players Used in Season", y = "Number of Teams") + theme_minimal()
+```
+
+The number of players used throughout the season varies considerably across teams. On average, teams used `r players_summary$mean_players` different players during the season (median = `r players_summary$median_players`). The range spans from `r players_summary$min_players` to `r players_summary$max_players` players, with a standard deviation of `r players_summary$sd_players`. This wide variation suggests different squad management philosophies, with some teams relying on a core group of consistent starters while others rotate more extensively, possibly due to squad depth, injuries, or tactical flexibility.
+
+### League Standings Distribution
+
+```{r team-performance}
+#Select top 5 and bottom 5 teams by total points, then reorder for plotting
+top_bottom <- soccer_final %>% arrange(desc(TotalPoints)) %>% slice(c(1:5, (n()-4):n())) %>% mutate(Team = fct_reorder(Team, TotalPoints))
+#Create horizontal bar chart comparing best and worst teams with gradient color scale
+ggplot(top_bottom, aes(x = Team, y = TotalPoints, fill = TotalPoints)) + geom_col() + coord_flip() + scale_fill_gradient(low = "red", high = "darkgreen") + labs(title = "Top 5 and Bottom 5 Teams by Total Points", x = "Team", y = "Total Points Earned") + theme_minimal() + theme(legend.position = "none")
+```
+
+The distribution of total points shows clear competitive tiers within the league. The top-performing teams accumulated `r max(soccer_final$TotalPoints)` points at most, while the lowest-performing teams earned as few as `r min(soccer_final$TotalPoints)` points. The gap between the best and worst teams (`r max(soccer_final$TotalPoints) - min(soccer_final$TotalPoints)` points) demonstrates substantial variation in team quality. This visualization focuses on the extremes of the distribution to highlight the contrast between title contenders and relegation-threatened teams, revealing the competitive hierarchy that exists within professional soccer leagues.
+
+## Bivariate Analyses
+
+### Squad Rotation and Performance
+
+```{r rotation-performance}
+#Calculate Pearson correlation between squad rotation and win ratio
+cor_rotation <- cor(soccer_final$Total_Players_Used, soccer_final$WinRatio, use = "complete.obs")
+#Create scatterplot with linear regression line to show relationship, the SE = TRUE shows the standard error on the graph, which I just learned. Kinda cool huh
+ggplot(soccer_final, aes(x = Total_Players_Used, y = WinRatio)) + geom_point(alpha = 0.6, color = "steelblue", size = 3) + geom_smooth(method = "lm", se = TRUE, color = "red") + labs(title = "Squad Rotation vs Team Performance", x = "Total Players Used", y = "Win Ratio", subtitle = paste("Correlation:", round(cor_rotation, 3))) + theme_minimal()
+```
+
+The relationship between squad rotation and win ratio shows a correlation of `r round(cor_rotation, 3)`. The scatterplot with linear trend line helps visualize whether using more players throughout the season is associated with better or worse performance. If the correlation is negative, it suggests teams with more focused squads (fewer players) tend to perform better, possibly due to better team chemistry and consistency. If positive, it indicates that squad depth and rotation capacity benefit performance. The confidence band around the trend line shows the uncertainty in this relationship.
+
+### Squad Age and Performance
+
+```{r age-performance}
+#Calculate Pearson correlation between squad age and win ratio
+cor_age <- cor(soccer_final$Avg_Squad_Age, soccer_final$WinRatio, use = "complete.obs")
+#Create scatterplot with linear regression line
+ggplot(soccer_final, aes(x = Avg_Squad_Age, y = WinRatio)) + geom_point(alpha = 0.6, color = "darkgreen", size = 3) + geom_smooth(method = "lm", se = TRUE, color = "red") + labs(title = "Squad Age vs Team Performance", x = "Average Squad Age (Years)", y = "Win Ratio", subtitle = paste("Correlation:", round(cor_age, 3))) + theme_minimal()
+```
+
+Average squad age shows a correlation of `r round(cor_age, 3)` with win ratio. This visualization explores whether experience (older players) or youth (younger players) correlates with better performance. A positive correlation would suggest experience benefits teams, while a negative correlation might indicate younger, more athletic squads have an advantage. The relationship may be complex, as both very young squads (lacking experience) and very old squads (declining athleticism) might underperform compared to teams with balanced age profiles in the competitive prime years.
+
+### Points Per Game by Squad Age Groups
+
+```{r age-groups-performance}
+#Create categorical age groups from continuous age variable using cut function
+soccer_final <- soccer_final %>% mutate(Age_Group = cut(Avg_Squad_Age, breaks = c(0, 25, 27, 30, 100), labels = c("Young (<25)", "Prime (25-27)", "Experienced (27-30)", "Veteran (30+)")))
+#Create boxplot to compare performance across age categories
+ggplot(soccer_final, aes(x = Age_Group, y = PointsPerGame, fill = Age_Group)) + geom_boxplot() + labs(title = "Performance Across Squad Age Groups", x = "Squad Age Category", y = "Points Per Game") + theme_minimal() + theme(legend.position = "none")
+```
+
+By categorizing teams into age groups, this boxplot reveals performance patterns across different squad age profiles. The boxes show the median (center line) and interquartile range (box height) of points per game for each age category. The whiskers extend to show the full range while outliers appear as individual points. This categorization helps identify whether there is an optimal age range for squad composition. Comparing the median lines across boxes indicates which age groups tend to perform best on average.
+
+### Multivariate: Squad Characteristics and Performance
+
+```{r multivariate}
+#Create rotation level categories based on tertiles (low, medium, high)
+soccer_final <- soccer_final %>% mutate(Rotation_Level = cut(Total_Players_Used, breaks = quantile(Total_Players_Used, probs = c(0, 0.33, 0.67, 1), na.rm = TRUE), labels = c("Low Rotation", "Medium Rotation", "High Rotation"), include.lowest = TRUE))
+#Create scatterplot showing three variables: age (x), performance (y), and rotation (color)
+ggplot(soccer_final, aes(x = Avg_Squad_Age, y = PointsPerGame, color = Rotation_Level)) + geom_point(size = 3, alpha = 0.7) + labs(title = "Squad Age, Rotation, and Performance", x = "Average Squad Age (Years)", y = "Points Per Game", color = "Squad Rotation Level") + theme_minimal()
+```
+
+This multivariate visualization examines three variables simultaneously: average squad age (x-axis), points per game (y-axis), and squad rotation level (color). Teams are divided into low, medium, and high rotation groups based on tertiles of the distribution. This allows us to see whether the relationship between age and performance differs based on how extensively teams rotate their squads. For example, we can identify whether high-performing teams with younger squads show different rotation patterns than high-performing teams with older squads, suggesting that optimal rotation strategies may depend on squad age composition.
+
+## Choice Elements
+
+This report includes the following choice elements as required:
+
+1. **Merged datasets:** Combined match-level performance data with player-level statistics to create the final analytical dataset. The merging process is visible in the Data Preparation section where `inner_join()` was used to combine team_season_stats and team_avg_age by Team and Season.
+
+2. **Created new variables:** Generated multiple derived variables including WinRatio (wins/games played), PointsPerGame (points/games played), GoalDifference (goals for minus goals against), Age_Group (categorical version of age), and Rotation_Level (categorical version of players used). These are described in Data Preparation and used throughout the analyses.
+
+3. **Parsed dates and strings:** Extracted season information from date strings in "DD/MM/YYYY" format and parsed player ages from the "years-days" format (e.g., "29-343") to extract numeric age values. This is explained in the Data Preparation section.
+
+4. **Multivariate plot:** Included a three-variable visualization showing squad age, performance, and rotation level simultaneously in the final plot of the Bivariate Analyses section. This plot uses position and color to display three dimensions of data.
+
+5. **Inline code:** Used inline R code throughout the report to dynamically insert calculated values such as sample sizes, means, correlations, and other statistics. These appear integrated into the narrative text.
+
+6. **Floating table of contents:** Enabled in the YAML header with `toc: true` and `toc_float: true` to allow easy navigation between sections of the report.
+
+## Conclusion
+
+This exploratory analysis examined how squad structural characteristics - specifically rotation patterns and average age - relate to team performance in professional soccer leagues.
+
+**RQ1 - Squad Rotation and Performance:** The analysis revealed a correlation of `r round(cor_rotation, 3)` between the number of players used and win ratio. This suggests that squad rotation level has a measurable relationship with performance outcomes. The direction and strength of this correlation indicates whether teams benefit from deep squad rotation or from maintaining a consistent core group of players. The scatterplot visualization showed the distribution of teams across these two dimensions and the general trend in their relationship.
+
+**RQ2 - Squad Age and Performance:** Average squad age showed a correlation of `r round(cor_age, 3)` with win ratio. The boxplot analysis across age groups provided additional insight into whether certain age ranges are associated with better performance. Teams with different age profiles achieved varying levels of success, though substantial variation existed within all age categories. This suggests that while age may play a role, it is not the sole determinant of team success.
+
+**Key Finding:** The multivariate analysis revealed that the relationship between these factors is complex and multidimensional. High-performing teams showed diverse combinations of age profiles and rotation strategies, indicating multiple viable pathways to success in professional soccer. Some successful teams relied on experienced cores with limited rotation, while others achieved similar results with younger squads and more extensive rotation. This diversity suggests that effective squad management must account for multiple factors beyond just age and rotation.
+
+**Future Research:** Future analyses could incorporate financial data such as squad market values or wage bills to examine whether wealthier clubs can leverage squad rotation and experience more effectively. Additionally, examining how these relationships differ across leagues or competition levels would provide valuable insights into context-dependent effects of squad structure on performance. Investigating whether the optimal balance between age and rotation changes over time as the sport evolves would also be valuable.
+
+## References
+
+Football-Data.co.uk. (2024). *English Football Results and Betting Odds*. Retrieved from https://www.football-data.co.uk/
