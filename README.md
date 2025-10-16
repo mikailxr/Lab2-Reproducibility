@@ -7,7 +7,7 @@ Lab 2 Reproducibility Lab based on my Project 1
 - see commit description
 
 ### R Markdown File
-- `projv2.Rmd` - Main analysis document
+- `projv2.Rmd` 
 
 ### Data Files
 You need two CSV files in the same directory as the .Rmd file:
@@ -27,22 +27,22 @@ install.packages("tidyverse")
 install.packages("knitr")
 ```
 
-## How to Run This Analysis
+ How to Run This Analysis
 
-1. **Clone or download this repository**
-2. **Make sure you have the data files:**
-   - Place `E0.csv` and `database.csv` in the same folder as `projv2.Rmd` (or use absolute path that should work) 
-3. **Open `projv2.Rmd` in RStudio**
-4. **Install required packages** (see above)
-5. Knit and you should be good
 
-## Project Structure
+ **Make sure you have the data files:**
+Place `E0.csv` and `database.csv` in the same folder as `projv2.Rmd` (or use absolute path that should work)
+Open `projv2.Rmd` in RStudio
+Install required packages** (see above)
+Knit and you should be good
+
+ Project Structure
 ```
-project-folder/
-  ├── README.md          # This file
-  ├── projv2.Rmd         # Main analysis
-  ├── E0.csv             # Match data
-  └── database.csv       # Player data
+project-folder
+   README.md          
+   projv2.Rmd         
+   E0.csv             
+   database.csv       
 ## This could be wrong but I'm pretty sure this is the structure
 ```
 
